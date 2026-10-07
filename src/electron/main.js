@@ -22,6 +22,7 @@ const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
 const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
 const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
 const fontSettingsApi = require('../shared/fontSettings');
+const cpaPoolSummary = require('./renderer/limits/cpaPoolSummary');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
@@ -553,6 +554,7 @@ function defaultSettings() {
   const windowBehavior = process.env.TOKEN_MONITOR_ALWAYS_ON_TOP === '0' ? 'normal' : 'floating';
   return {
     hubMode: envHubUrl ? 'client' : 'local',
+    hubRemoteOnly: false,
     hubUrl: envHubUrl,
     hubHostPort: Math.max(1, Math.min(65535, Number(process.env.TOKEN_MONITOR_PORT) || HUB_DEFAULT_PORT)),
     // Default to TOKEN_MONITOR_SECRET so agents that already trust this env
@@ -818,7 +820,7 @@ function electronLimitsConfig() {
     && parseLimitProviders(settings?.limitProviders).includes('workbuddy');
   const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform();
   const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported;
-  return limitsConfigFromSettings(settings, {
+  const config = limitsConfigFromSettings(settings, {
     env: process.env,
     workbuddyDesktopSessionOnly: true,
     workbuddyDesktopSessionSupported,
@@ -829,6 +831,9 @@ function electronLimitsConfig() {
     antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
     mimoManagedAccounts: mimoManagedAccountsForCollector()
   });
+  // Hub Client with remote limits: quotas arrive from the Hub (CPA), so this PC only produces usage.
+  if (settings?.hubMode === 'client' && settings?.hubRemoteOnly === true) config.limitsEnabled = false;
+  return config;
 }
 
 function electronDeviceEnvelope() {
@@ -4926,7 +4931,7 @@ function updateTrayDisplay() {
   if (trayShowsTitle(process.platform)) tray.setTitle(text);
   // Tooltip always shows a useful summary, even in icon-only mode where setTitle is blank.
   const tip = formatTrayText(visibleStats, 'both', currency, compactOptions);
-  tray.setToolTip(`Token Monitor - ${tip}`);
+  tray.setToolTip(cpaPoolSummary.tooltip(visibleStats) || `Token Monitor - ${tip}`);
   // Icon: rendered bars image in bar modes, otherwise the app icon.
   let icon = null;
   if (barsImageMode || trayImageMode || customImageMode) {
@@ -6708,6 +6713,8 @@ function sendAppUpdatePush() {
 }
 
 async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
+  // A dedicated CPA build must not replace itself with an upstream-only release.
+  if (settings?.hubRemoteOnly === true) return deriveAppUpdateState();
   // An outstanding install owns the updater until the guard is idle again.
   // electron-updater reports a failed check by emitting on the same global 'error'
   // event an install failure arrives on -- checkForUpdates() emits there and

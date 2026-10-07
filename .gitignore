@@ -23,3 +23,5 @@ worker/.wrangler/
 worker/node_modules/
 worker/.dev.vars
 devlog/
+integrations/cpa/__pycache__/
+integrations/cpa/launch-hidden.vbs

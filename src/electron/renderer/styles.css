@@ -4520,6 +4520,20 @@ html.is-windows .settings-panel select option {
   scrollbar-width: none;
 }
 .limits-panel::-webkit-scrollbar { width: 0; height: 0; }
+.cpa-quota-only .total-panel { display: none; }
+.cpa-pool-summary {
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid var(--muted);
+  padding: 2px 0 12px 10px;
+  font-size: 11px;
+}
+.cpa-pool-healthy { border-left-color: #69d7a5; }
+.cpa-pool-degraded { border-left-color: #edc275; }
+.cpa-pool-unavailable { border-left-color: #f29b9b; }
+.cpa-pool-heading { color: var(--text); font-weight: 600; margin-bottom: 9px; }
+.cpa-pool-row { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; margin-top: 7px; }
+.cpa-pool-count { color: var(--text); font-variant-numeric: tabular-nums; }
+.cpa-pool-detail { grid-column: 1 / -1; color: var(--muted); overflow-wrap: anywhere; font-size: 10px; }
 .service-status-panel {
   position: relative;
   z-index: 1;

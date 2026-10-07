@@ -4508,6 +4508,7 @@ function animateLimitResets(snapshot) {
 
 function renderLimits() {
   if (!els.limitsPanel) return;
+  document.body.classList.toggle('cpa-quota-only', state.settings?.hubRemoteOnly === true && state.breakdown === 'limits');
   const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
   const holdCodexSwitchPopoverRender = codexAccountControl.deferRender(els.limitsPanel);
   if (holdLimitDetailTooltipRender || holdCodexSwitchPopoverRender) {
@@ -4516,6 +4517,7 @@ function renderLimits() {
   }
   state.limitDetailTooltipRenderPending = false;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
+  const cpaSummary = limitsEnabled ? window.TokenMonitorCpaPoolSummary.render(state.stats, { document, formatDuration }) : null;
   const enabled = enabledLimitProviderSet();
   const providers = providersByLimitProviderId(state.stats?.limits?.providers || []);
   const orderedProviders = limitProviderOrderApi
@@ -4552,11 +4554,12 @@ function renderLimits() {
       state.codexResetForecast || null
     ],
     providerOrder: orderedProviders.map(({ id }) => id),
-    providers: [...visibleProviderEntries.entries()]
+    providers: [...visibleProviderEntries.entries()],
+    cpa: cpaSummary?.textContent || ''
   });
   if (
     state.limitPanelRenderSignature === renderSignature
-    && els.limitsPanel.children.length === orderedProviders.length
+    && els.limitsPanel.children.length === orderedProviders.length + (cpaSummary ? 1 : 0)
   ) {
     // View changes intentionally reuse the rendered Limits DOM. Replaying the
     // entrance motion here keeps that cache from swallowing the normal bar fill.
@@ -4565,10 +4568,10 @@ function renderLimits() {
   }
   const resetMotionSnapshot = captureLimitResetMotion();
   state.limitPanelRenderSignature = renderSignature;
-  const nodes = [];
+  const nodes = cpaSummary ? [cpaSummary] : [];
   const rows = orderedProviders;
   if (rows.length === 0) {
-    els.limitsPanel.replaceChildren();
+    els.limitsPanel.replaceChildren(...nodes);
     return;
   }
   for (const { id, label } of rows) {
