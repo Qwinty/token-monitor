@@ -3694,8 +3694,14 @@ function startCollector(options) {
   // maxAgeMs, otherwise the same scope the interval loop would pick (today-only
   // against a fresh anchor, a full scan when the anchor is stale or missing).
   function tickOnDemand(reason, tickOptions = {}) {
+    // A scan already running answers this request too; queueing another behind
+    // it would run a second full scan the moment the first one ends.
+    if (tickInFlight) return whenIdle().then(() => false);
     const maxAgeMs = Number(tickOptions.maxAgeMs) > 0 ? Number(tickOptions.maxAgeMs) : 0;
-    if (!tickInFlight && maxAgeMs > 0 && lastTickSuccessAt > 0 && Date.now() - lastTickSuccessAt < maxAgeMs) {
+    // Failed scans count as well, or a failing tokscale would rescan on every
+    // request with no cooldown at all.
+    const lastFinishedAt = Math.max(lastTickSuccessAt || 0, lastTickFailureAt || 0);
+    if (maxAgeMs > 0 && lastFinishedAt > 0 && Date.now() - lastFinishedAt < maxAgeMs) {
       return Promise.resolve(false);
     }
     const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;

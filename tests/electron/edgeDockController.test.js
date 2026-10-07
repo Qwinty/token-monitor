@@ -181,6 +181,8 @@ function createFixture(options = {}) {
       haptics.push(pattern);
       hapticCalls.push({ pattern, performanceTime });
     },
+    onBubbleOpen: options.onBubbleOpen,
+    onBubbleClose: options.onBubbleClose,
     onPlacementChange: (placement) => {
       placements.push(placement);
       settings.edgeDockSide = placement.side;
@@ -424,6 +426,23 @@ test('structural updates only haptic when the item under the pointer changes', a
   ]);
   await new Promise((resolve) => setTimeout(resolve, 55));
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
+});
+
+test('opening and closing a card are reported to the owner', (t) => {
+  const events = [];
+  const fixture = createFixture({
+    onBubbleOpen: (cellId) => events.push(['open', cellId]),
+    onBubbleClose: () => events.push(['close'])
+  });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  assert.deepEqual(events, [['open', 'codex']]);
+  fixture.controller.setCells([
+    { id: 'claude', kind: 'provider', label: 'Claude' }
+  ]);
+  assert.deepEqual(events, [['open', 'codex'], ['close']]);
 });
 
 test('an open card follows its cell id across removal and reorder', (t) => {

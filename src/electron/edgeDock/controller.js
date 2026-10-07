@@ -86,6 +86,7 @@ function createEdgeDockController(deps) {
     canRefreshLimits = () => false,
     onRefreshLimits,
     onBubbleOpen,
+    onBubbleClose,
     onOpenResetForecastSource,
     performHaptic = () => false,
     // (display) => whether another app is full screen on that display.
@@ -644,6 +645,7 @@ function createEdgeDockController(deps) {
     refreshVisible = false;
     refreshHovered = false;
     bubbleVisible = false;
+    if (bubbleCell !== null) notifyBubbleClose();
     bubbleCell = null;
     bubblePlaced = null;
     builtGlass = null;
@@ -883,6 +885,10 @@ function createEdgeDockController(deps) {
     showPeek();
   }
 
+  function notifyBubbleClose() {
+    try { onBubbleClose?.(); } catch (error) { logger(`[edge-dock] bubble close hook failed: ${error.message}`); }
+  }
+
   function showBubble(cellIndex) {
     bubbleCell = cellIndex;
     try { onBubbleOpen?.(cells[cellIndex]?.id); } catch (error) { logger(`[edge-dock] bubble open hook failed: ${error.message}`); }
@@ -915,7 +921,10 @@ function createEdgeDockController(deps) {
     const bubble = windows.bubble;
     const hadCell = bubbleCell !== null;
     bubbleCell = null;
-    if (hadCell) render('rail');
+    if (hadCell) {
+      notifyBubbleClose();
+      render('rail');
+    }
     if (!alive(bubble) || !bubbleVisible) return;
     bubbleVisible = false;
     setVisible('bubble', false, FADE_OUT_MS);

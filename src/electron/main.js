@@ -494,6 +494,11 @@ const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval', 'manual']);
 // On-demand ('manual') collection reuses a scan this young instead of spawning
 // tokscale again when a usage view is reopened.
 const ON_DEMAND_USAGE_MAX_AGE_MS = 60 * 1000;
+// The edge dock reveals whenever the pointer reaches the screen edge, so its
+// cards open far more often than anyone asks for usage. A card has to stay open
+// for a moment before it scans, and reuses a scan up to five minutes old.
+const ON_DEMAND_DOCK_MAX_AGE_MS = 5 * 60 * 1000;
+const ON_DEMAND_DOCK_DWELL_MS = 1500;
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 // Smart mode's cadence is fixed and resolved directly in collectorIntervalMs(),
 // so it stays out of COLLECTION_INTERVAL_OPTIONS: that list validates the
@@ -794,11 +799,29 @@ function requestOnDemandUsageScan(trigger) {
   // count only while a usage view is actually on screen.
   if (trigger === 'view' || trigger === 'show') {
     if (LIMITS_ONLY_BREAKDOWNS.has(rendererViewState?.breakdown)) return;
-    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized()) return;
   }
+  const maxAgeMs = trigger === 'dock' ? ON_DEMAND_DOCK_MAX_AGE_MS : ON_DEMAND_USAGE_MAX_AGE_MS;
   Promise.resolve()
-    .then(() => deviceRuntimeHandle.tick('manual', { onDemand: true, maxAgeMs: ON_DEMAND_USAGE_MAX_AGE_MS }))
+    .then(() => deviceRuntimeHandle.tick('manual', { onDemand: true, maxAgeMs }))
     .catch((error) => console.log(`[usage] on-demand scan failed: ${error.message}`));
+}
+
+let dockUsageScanTimer = null;
+
+function cancelDockUsageScan() {
+  if (dockUsageScanTimer) clearTimeout(dockUsageScanTimer);
+  dockUsageScanTimer = null;
+}
+
+// A dock card scans only once it has stayed open past the dwell, so sweeping the
+// pointer along the screen edge never spawns tokscale.
+function scheduleDockUsageScan() {
+  if (collectorBackgroundCollection() || dockUsageScanTimer) return;
+  dockUsageScanTimer = setTimeout(() => {
+    dockUsageScanTimer = null;
+    requestOnDemandUsageScan('dock');
+  }, ON_DEMAND_DOCK_DWELL_MS);
 }
 
 function collectorWatchTriggersCollection() {
@@ -2164,7 +2187,7 @@ function updateRendererViewState(patch) {
     settings.lastViewState = { ...rendererViewState };
     saveSettings();
   }
-  return rendererViewState;
+  return changed;
 }
 
 function sendFloatingBubbleState() {
@@ -2172,11 +2195,17 @@ function sendFloatingBubbleState() {
   try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
 }
 
+let mainWindowShownForUsage = false;
+
 function sendMainWindowVisibility(win = mainWindow) {
   if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
   const visible = win.isVisible() && !win.isMinimized();
   win.webContents.send('window:visibility', visible);
-  if (visible) requestOnDemandUsageScan('show');
+  // Only the hidden-to-visible edge counts: show and restore can both report
+  // the same appearance, and a repeat must not rescan.
+  const becameVisible = visible && !mainWindowShownForUsage;
+  mainWindowShownForUsage = visible;
+  if (becameVisible) requestOnDemandUsageScan('show');
 }
 
 function stopFloatingBubbleAutoCollapseTimer() {
@@ -5792,7 +5821,8 @@ function ensureEdgeDockController() {
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
     // Dock cards show local sessions and totals next to quotas.
-    onBubbleOpen: () => requestOnDemandUsageScan('dock'),
+    onBubbleOpen: () => scheduleDockUsageScan(),
+    onBubbleClose: () => cancelDockUsageScan(),
     onOpenResetForecastSource: () => {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },
@@ -7907,8 +7937,9 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.on('window:viewState', (_event, patch) => {
-    updateRendererViewState(patch);
-    requestOnDemandUsageScan('view');
+    // The renderer republishes an unchanged view on many renders; only a real
+    // switch of view or period asks for a scan.
+    if (updateRendererViewState(patch)) requestOnDemandUsageScan('view');
   });
   ipcMain.handle('floatingBubble:expand', () => expandFloatingBubble());
   ipcMain.handle('floatingBubble:peek', () => expandFloatingBubble({ focus: false }));

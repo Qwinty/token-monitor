@@ -150,6 +150,62 @@ test('on-demand collection scans only when asked and reuses a fresh scan', async
   }
 });
 
+test('on-demand requests join a running scan and respect the cooldown after a failure', async () => {
+  let scans = 0;
+  let fail = false;
+  let release = null;
+  let updates = 0;
+  const runtime = startCollector({
+    clients: 'codex',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-on-demand-join',
+    intervalMs: 1,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    backgroundCollection: false,
+    historyEnabled: false,
+    anchorPersistenceEnabled: false,
+    startBarrier: Promise.resolve(),
+    runTokscale: async () => {
+      scans += 1;
+      if (release === null) await new Promise((resolve) => { release = resolve; });
+      if (fail) throw new Error('tokscale failed');
+      return emptyTokscaleResult();
+    },
+    onUpdate: () => { updates += 1; },
+    onError: () => {}
+  });
+
+  try {
+    await runtime.whenIdle();
+    const first = runtime.tick('manual', { onDemand: true, maxAgeMs: 60000 });
+    while (release === null) await new Promise((resolve) => setTimeout(resolve, 5));
+    // Two more requests while the first scan runs: both join it.
+    const joined = [
+      runtime.tick('manual', { onDemand: true, maxAgeMs: 60000 }),
+      runtime.tick('manual', { onDemand: true, maxAgeMs: 60000 })
+    ];
+    release();
+    await first;
+    assert.deepEqual(await Promise.all(joined), [false, false]);
+    await runtime.whenIdle();
+    // One scan ran, not one per request.
+    assert.equal(updates, 1);
+    const scansAfterFirst = scans;
+
+    // A failed plain tick still starts the cooldown for on-demand requests.
+    fail = true;
+    await runtime.tick('manual', {});
+    const scansAfterFailure = scans;
+    assert.ok(scansAfterFailure > scansAfterFirst);
+    assert.equal(await runtime.tick('manual', { onDemand: true, maxAgeMs: 60000 }), false);
+    assert.equal(scans, scansAfterFailure);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('forced Cursor sync bypasses the throttle and resets the ordinary cadence', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
