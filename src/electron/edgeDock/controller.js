@@ -85,6 +85,7 @@ function createEdgeDockController(deps) {
     onSwitchCodexAccount,
     canRefreshLimits = () => false,
     onRefreshLimits,
+    onBubbleOpen,
     onOpenResetForecastSource,
     performHaptic = () => false,
     // (display) => whether another app is full screen on that display.
@@ -884,6 +885,7 @@ function createEdgeDockController(deps) {
 
   function showBubble(cellIndex) {
     bubbleCell = cellIndex;
+    try { onBubbleOpen?.(cells[cellIndex]?.id); } catch (error) { logger(`[edge-dock] bubble open hook failed: ${error.message}`); }
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
     // nothing would ever report a size to reveal it. Send it again, and reveal

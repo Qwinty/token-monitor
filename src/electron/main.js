@@ -790,9 +790,12 @@ const LIMITS_ONLY_BREAKDOWNS = new Set(['limits', 'status']);
 // screen, and is skipped while the last scan is younger than the cache age.
 function requestOnDemandUsageScan(trigger) {
   if (collectorBackgroundCollection() || !ownsUsageRuntime()) return;
-  const breakdown = rendererViewState?.breakdown;
-  if (trigger !== 'dashboard' && LIMITS_ONLY_BREAKDOWNS.has(breakdown)) return;
-  if (trigger !== 'dashboard' && (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible())) return;
+  // The dashboard and dock cards are opened on purpose; main-window triggers
+  // count only while a usage view is actually on screen.
+  if (trigger === 'view' || trigger === 'show') {
+    if (LIMITS_ONLY_BREAKDOWNS.has(rendererViewState?.breakdown)) return;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+  }
   Promise.resolve()
     .then(() => deviceRuntimeHandle.tick('manual', { onDemand: true, maxAgeMs: ON_DEMAND_USAGE_MAX_AGE_MS }))
     .catch((error) => console.log(`[usage] on-demand scan failed: ${error.message}`));
@@ -5788,6 +5791,8 @@ function ensureEdgeDockController() {
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    // Dock cards show local sessions and totals next to quotas.
+    onBubbleOpen: () => requestOnDemandUsageScan('dock'),
     onOpenResetForecastSource: () => {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },
