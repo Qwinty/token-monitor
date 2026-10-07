@@ -394,7 +394,7 @@ function sanitizeCollector(collector = {}, platform) {
   const safe = {
     detailsAvailable: collector.detailsAvailable !== false,
     state: safeChoice(collector.state, new Set(['stopped', 'running', 'idle', 'failed', 'stale', 'unavailable'])),
-    collectionMode: safeChoice(collector.collectionMode, new Set(['live', 'smart', 'interval'])),
+    collectionMode: safeChoice(collector.collectionMode, new Set(['live', 'smart', 'interval', 'manual'])),
     intervalMs: boundedNumber(collector.intervalMs),
     watchDebounceMs: boundedNumber(collector.watchDebounceMs),
     watchEnabled: collector.watchEnabled === true,

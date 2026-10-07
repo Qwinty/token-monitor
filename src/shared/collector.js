@@ -2474,6 +2474,9 @@ function startCollector(options) {
   // pull every lone event forward and make the debounce itself unobservable.
   const watchMaxWaitMs = Math.max(watchDebounceMs, clampTimerDelayMs(options.watchMaxWaitMs, WATCH_MAX_WAIT_MS));
   const intervalMs = clampTimerDelayMs(options.intervalMs, 5 * 60 * 1000);
+  // On-demand collection: no interval loop and no startup scan. Scans run only
+  // when a caller asks (tick), so an idle widget never spawns tokscale.
+  const backgroundCollection = options.backgroundCollection !== false;
   const historyRetryMs = clampTimerDelayMs(options.historyRetryMs, 60 * 1000);
   const watchUsePolling = resolveWatchUsePolling(options.watchUsePolling);
   // Overridable so tests need not build a 20k-entry tree to cross it.
@@ -3508,7 +3511,7 @@ function startCollector(options) {
   }
 
   function loop() {
-    if (stopped) return;
+    if (stopped || !backgroundCollection) return;
     const activityRevisionAtStart = activityRevision;
     // Native watchers are an optimization, not the source of truth. Always
     // retain the hourly reconciliation path for missed events, newly created
@@ -3624,7 +3627,9 @@ function startCollector(options) {
           : 'idle';
     return {
       state,
-      collectionMode: watchTriggersCollection ? 'live' : intervalRequiresActivity ? 'smart' : 'interval',
+      collectionMode: !backgroundCollection
+        ? 'manual'
+        : watchTriggersCollection ? 'live' : intervalRequiresActivity ? 'smart' : 'interval',
       intervalMs,
       watchDebounceMs,
       watchEnabled,
@@ -3651,6 +3656,14 @@ function startCollector(options) {
   }
 
   setupWatchers();
+  if (!backgroundCollection && startBarrier) {
+    // No tick consumes the barrier at startup in on-demand mode, so release it
+    // here once it settles; whenIdle() would otherwise re-await it forever.
+    const barrier = startBarrier;
+    Promise.resolve(barrier).catch(() => {}).then(() => {
+      if (startBarrier === barrier) startBarrier = null;
+    });
+  }
   loop();
   if (options.sessionActivityPolling !== false && sessionActivityProvidersFor(trackedClients).length) {
     activityScheduler = createSessionActivityScheduler({
@@ -3675,6 +3688,19 @@ function startCollector(options) {
       }
     });
     codexLocalSource.start();
+  }
+
+  // An on-demand scan: skipped when the last successful tick is younger than
+  // maxAgeMs, otherwise the same scope the interval loop would pick (today-only
+  // against a fresh anchor, a full scan when the anchor is stale or missing).
+  function tickOnDemand(reason, tickOptions = {}) {
+    const maxAgeMs = Number(tickOptions.maxAgeMs) > 0 ? Number(tickOptions.maxAgeMs) : 0;
+    if (!tickInFlight && maxAgeMs > 0 && lastTickSuccessAt > 0 && Date.now() - lastTickSuccessAt < maxAgeMs) {
+      return Promise.resolve(false);
+    }
+    const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
+    const anchorToday = Boolean(!fullScanDue && anchor && anchor.dateKey === localTodayKey());
+    return runTick(reason, anchorToday ? { todayOnly: true, refreshWsl: true, targetClients: [] } : {});
   }
 
   // A rescan of one tool. Was cursor-only because a Cursor sign-in was the only
@@ -3708,7 +3734,9 @@ function startCollector(options) {
       return runTick('dots-visibility', { todayOnly: true, targetClients: ['codex'], forceHistory: true });
     },
     stop,
-    tick: (reason = 'manual', tickOptions = {}) => runTick(reason, tickOptions),
+    tick: (reason = 'manual', tickOptions = {}) => (tickOptions?.onDemand === true
+      ? tickOnDemand(reason, tickOptions)
+      : runTick(reason, tickOptions)),
     whenIdle
   };
 }

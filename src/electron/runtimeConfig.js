@@ -55,6 +55,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'watchUsePolling',
   'watchTriggersCollection',
   'intervalRequiresActivity',
+  'backgroundCollection',
   'watchDebounceMs',
   'wslScanEnabled'
 ]);
@@ -118,6 +119,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchUsePolling: context.watchUsePolling,
     watchTriggersCollection: context.watchTriggersCollection !== false,
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
+    backgroundCollection: context.backgroundCollection !== false,
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
     wslScanEnabled: settings.wslScanEnabled !== false,
     onError: context.onError,

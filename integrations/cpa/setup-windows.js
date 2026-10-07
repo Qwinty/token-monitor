@@ -25,7 +25,9 @@ const required = {
 const defaults = {
   language: 'en', lastViewState: { period: 'today', breakdown: 'limits' }, startAtLogin: false,
   windowBehavior: 'floating', showTrayIcon: true, trayContent: 'limitsAllSessions',
-  showLimitSource: true, maskLimitAccountEmails: false
+  showLimitSource: true, maskLimitAccountEmails: false,
+  // Quotas stream from the Hub; local tokscale scans run only when a usage view opens.
+  collectionMode: 'manual'
 };
 const next = { ...saved, ...required };
 for (const [key, value] of Object.entries(defaults)) if (next[key] === undefined) next[key] = value;

@@ -490,7 +490,10 @@ const CSP_HEADER = [
 const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
-const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
+const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval', 'manual']);
+// On-demand ('manual') collection reuses a scan this young instead of spawning
+// tokscale again when a usage view is reopened.
+const ON_DEMAND_USAGE_MAX_AGE_MS = 60 * 1000;
 const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
 // Smart mode's cadence is fixed and resolved directly in collectorIntervalMs(),
 // so it stays out of COLLECTION_INTERVAL_OPTIONS: that list validates the
@@ -772,7 +775,27 @@ function collectorIntervalMs() {
 }
 
 function collectorWatchEnabled() {
-  return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
+  const collectionMode = normalizeCollectionMode(settings?.collectionMode);
+  return collectionMode !== 'interval' && collectionMode !== 'manual';
+}
+
+function collectorBackgroundCollection() {
+  return normalizeCollectionMode(settings?.collectionMode) !== 'manual';
+}
+
+// Views that only read quota data never need a local scan.
+const LIMITS_ONLY_BREAKDOWNS = new Set(['limits', 'status']);
+
+// In on-demand mode a usage scan runs when a view that shows local usage is on
+// screen, and is skipped while the last scan is younger than the cache age.
+function requestOnDemandUsageScan(trigger) {
+  if (collectorBackgroundCollection() || !ownsUsageRuntime()) return;
+  const breakdown = rendererViewState?.breakdown;
+  if (trigger !== 'dashboard' && LIMITS_ONLY_BREAKDOWNS.has(breakdown)) return;
+  if (trigger !== 'dashboard' && (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible())) return;
+  Promise.resolve()
+    .then(() => deviceRuntimeHandle.tick('manual', { onDemand: true, maxAgeMs: ON_DEMAND_USAGE_MAX_AGE_MS }))
+    .catch((error) => console.log(`[usage] on-demand scan failed: ${error.message}`));
 }
 
 function collectorWatchTriggersCollection() {
@@ -808,6 +831,7 @@ function electronUsageConfig(errorPrefix) {
     // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
+    backgroundCollection: collectorBackgroundCollection(),
     watchDebounceMs: 1500,
     dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
     onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
@@ -2147,7 +2171,9 @@ function sendFloatingBubbleState() {
 
 function sendMainWindowVisibility(win = mainWindow) {
   if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
-  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+  const visible = win.isVisible() && !win.isMinimized();
+  win.webContents.send('window:visibility', visible);
+  if (visible) requestOnDemandUsageScan('show');
 }
 
 function stopFloatingBubbleAutoCollapseTimer() {
@@ -7877,6 +7903,7 @@ app.whenReady().then(() => {
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
+    requestOnDemandUsageScan('view');
   });
   ipcMain.handle('floatingBubble:expand', () => expandFloatingBubble());
   ipcMain.handle('floatingBubble:peek', () => expandFloatingBubble({ focus: false }));
@@ -9092,6 +9119,7 @@ app.whenReady().then(() => {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+    requestOnDemandUsageScan('dashboard');
   });
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });

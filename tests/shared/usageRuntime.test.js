@@ -105,6 +105,51 @@ test('startCollector exposes safe on-demand runtime diagnostics', async () => {
   assert.equal(runtime.getDiagnostics().state, 'stopped');
 });
 
+test('on-demand collection scans only when asked and reuses a fresh scan', async () => {
+  const updates = [];
+  let scans = 0;
+  const runtime = startCollector({
+    clients: 'codex',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'usage-on-demand',
+    intervalMs: 1,
+    watchEnabled: false,
+    watchTriggersCollection: false,
+    backgroundCollection: false,
+    historyEnabled: false,
+    anchorPersistenceEnabled: false,
+    startBarrier: Promise.resolve(),
+    runTokscale: async () => { scans += 1; return emptyTokscaleResult(); },
+    onUpdate: (summary, reason) => updates.push({ summary, reason })
+  });
+
+  try {
+    // No startup scan and no interval loop; whenIdle() must still settle.
+    await runtime.whenIdle();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(scans, 0);
+    assert.equal(updates.length, 0);
+    assert.equal(runtime.getDiagnostics().collectionMode, 'manual');
+
+    await runtime.tick('manual', { onDemand: true, maxAgeMs: 60000 });
+    assert.ok(scans > 0);
+    assert.equal(updates.length, 1);
+
+    const scansAfterFirst = scans;
+    assert.equal(await runtime.tick('manual', { onDemand: true, maxAgeMs: 60000 }), false);
+    assert.equal(scans, scansAfterFirst);
+    assert.equal(updates.length, 1);
+
+    // A plain manual tick (the refresh button) is never served from the cache.
+    await runtime.tick('manual', {});
+    assert.ok(scans > scansAfterFirst);
+    assert.equal(updates.length, 2);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('forced Cursor sync bypasses the throttle and resets the ordinary cadence', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
