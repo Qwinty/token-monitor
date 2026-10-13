@@ -6,6 +6,8 @@
     <h1>Token Monitor</h1>
 </div>
 
+> **Fork of [Javis603/token-monitor](https://github.com/Javis603/token-monitor)** with a CPA quota pool widget, a hybrid Hub Client mode, and on-demand usage collection. See [FORK.md](FORK.md) for what changed and how it works.
+
 <p align="center">
     <em>One live dashboard for every AI coding tool, synced across every machine.</em>
 </p>
